@@ -84,13 +84,41 @@ class EventHubSpec: QuickSpec {
                     expect(result).toEventually(equal(1))
                 }
             }
+            
+            context("when the block is run asynchronously on the custom(main) thread") {
+                beforeEach {
+                    result = 0
+                    observer = Observer()
+                    
+                    EventHub.addObserver(observer!, thread: .Custom(queue: dispatch_get_main_queue())) { (event: LoginEvent) in
+                        expect(NSThread.isMainThread()) == true
+                        
+                        switch event {
+                        case .Success(let i):
+                            result = result + i
+                        case .Failure:
+                            break
+                        }
+                    }
+                }
+                afterEach {
+                    if let observer = observer {
+                        EventHub.removeObserver(observer)
+                    }
+                }
+                
+                it("is observed") {
+                    EventHub.post(LoginEvent.Success(1))
+                    expect(result).toEventually(equal(1))
+                }
+            }
 
             context("when the block is run asynchronously on the background thread") {
                 beforeEach {
                     result = 0
                     observer = Observer()
 
-                    EventHub.addObserver(observer!, thread: .Background(queue: nil)) { (event: LoginEvent) in
+                    EventHub.addObserver(observer!, thread: .Background) { (event: LoginEvent) in
                         expect(NSThread.isMainThread()) == false
 
                         switch event {
@@ -107,6 +135,34 @@ class EventHubSpec: QuickSpec {
                     }
                 }
 
+                it("is observed") {
+                    EventHub.post(LoginEvent.Success(1))
+                    expect(result).toEventually(equal(1))
+                }
+            }
+            
+            context("when the block is run asynchronously on the custom(background) thread") {
+                beforeEach {
+                    result = 0
+                    observer = Observer()
+                    
+                    EventHub.addObserver(observer!, thread: .Custom(queue: dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0))) { (event: LoginEvent) in
+                        expect(NSThread.isMainThread()) == false
+                        
+                        switch event {
+                        case .Success(let i):
+                            result = result + i
+                        case .Failure:
+                            break
+                        }
+                    }
+                }
+                afterEach {
+                    if let observer = observer {
+                        EventHub.removeObserver(observer)
+                    }
+                }
+                
                 it("is observed") {
                     EventHub.post(LoginEvent.Success(1))
                     expect(result).toEventually(equal(1))

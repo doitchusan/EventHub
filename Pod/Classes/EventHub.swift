@@ -2,40 +2,48 @@ public protocol EventType {}
 
 public enum Thread {
     case Main
-    case Background(queue: dispatch_queue_t?)
+    case Background
+    case Custom(queue: dispatch_queue_t)
 
     private var queue: dispatch_queue_t {
         switch self {
         case .Main:
             return dispatch_get_main_queue()
-        case .Background(let queue):
-            return queue ?? dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
+        case .Background:
+            return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
+        case .Custom(let queue):
+            return queue
         }
     }
 }
 
-public struct EventHub {
-
-    private struct Observation {
-        weak var observer: AnyObject?
-        let thread: Thread?
-        let block: Any
+private class EventHubManager {
+    static let shared = EventHubManager()
+    
+    var observations = [Observation]()
+    let queue = dispatch_queue_create("EventHubManager.queue", nil)
+    
+    func addObserver(observer: AnyObject, thread: Thread?, block: Any) {
+        dispatch_sync(queue) {
+            let observation = Observation(observer: observer, thread: thread, block: block)
+            self.observations.append(observation)
+        }
     }
-
-    private static var observations = [Observation]()
-
-    public static func addObserver<T: EventType>(observer: AnyObject, thread: Thread? = nil, block: T -> ()) {
-        observations.append(Observation(observer: observer, thread: thread, block: block))
+    
+    func removeObserver(observer: AnyObject) {
+        dispatch_sync(queue) {
+            self.observations = self.observations.filter { $0.observer! !== observer }
+        }
     }
-
-    public static func removeObserver(observer: AnyObject) {
-        observations = observations.filter { $0.observer! !== observer }
-    }
-
-    public static func post<T: EventType>(event: T) {
-        observations = observations.filter { $0.observer != nil } // Remove nil observers
-        observations.forEach {
-            if let block = $0.block as? T -> () {
+    
+    func post<T: EventType>(event: T) {
+        dispatch_sync(queue) {
+            self.observations = self.observations.filter { $0.observer != nil } // Remove nil observers
+            self.observations.forEach {
+                guard let block = $0.block as? T -> () else {
+                    return
+                }
+                
                 if let queue = $0.thread?.queue {
                     dispatch_async(queue) {
                         block(event)
@@ -46,5 +54,22 @@ public struct EventHub {
             }
         }
     }
+}
 
+private struct Observation {
+    weak var observer: AnyObject?
+    let thread: Thread?
+    let block: Any
+}
+
+public func addObserver<T: EventType>(observer: AnyObject, thread: Thread? = nil, block: T -> ()) {
+    EventHubManager.shared.addObserver(observer, thread: thread, block: block)
+}
+
+public func removeObserver(observer: AnyObject) {
+    EventHubManager.shared.removeObserver(observer)
+}
+
+public func post<T: EventType>(event: T) {
+    EventHubManager.shared.post(event)
 }
